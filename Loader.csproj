@@ -1,0 +1,44 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>AnyRadianceLoader</AssemblyName>
+    <RootNamespace>AnyRadianceLoader</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <!-- при сборке подправьте путь к Managed, если нужно -->
+    <LocalRefs>$(MSBuildProgramFiles32)/Steam/steamapps/common/Hollow Knight/hollow_knight_Data/Managed</LocalRefs>
+    <!-- Итоговая DLL сразу кладём в Mods\AnyRadianceLoader -->
+    <OutputPath>C:\Program Files (x86)\Steam\steamapps\common\Hollow Knight\hollow_knight_Data\Managed\Mods\AnyRadianceLoader\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <PostBuildEvent>powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem '$(TargetDir)' -File | Where-Object { $_.Name -notin 'AnyRadianceLoader.dll','AnyRadianceLoader.pdb' } | Remove-Item -Force; if (Test-Path '$(TargetDir)..\\AnyRadianceFixedDDark') { Remove-Item -Recurse -Force '$(TargetDir)..\\AnyRadianceFixedDDark' }; if (Test-Path '$(TargetDir)..\\AnyRadiance2-1.5') { Remove-Item -Recurse -Force '$(TargetDir)..\\AnyRadiance2-1.5' }; if (Test-Path '$(TargetDir)..\\ModCommon') { Remove-Item -Recurse -Force '$(TargetDir)..\\ModCommon' }"</PostBuildEvent>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(LocalRefs)/Assembly-CSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="Assembly-CSharp-firstpass">
+      <HintPath>$(LocalRefs)/Assembly-CSharp-firstpass.dll</HintPath>
+    </Reference>
+    <Reference Include="PlayMaker">
+      <HintPath>$(LocalRefs)/PlayMaker.dll</HintPath>
+    </Reference>
+    <Reference Include="MMHOOK_Assembly-CSharp">
+      <HintPath>$(LocalRefs)/MMHOOK_Assembly-CSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(LocalRefs)/UnityEngine.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(LocalRefs)/UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Embedded\AnyRadianceFixedDDark\AnyRadiance.dll" />
+    <EmbeddedResource Include="Embedded\ModCommon\ModCommon_1.5.dll" />
+    <EmbeddedResource Include="Embedded\AnyRadiance2-1.5\AnyRadiance.dll" />
+    <EmbeddedResource Include="Embedded\AnyRadiance2-1.5\AnyRadiance.pdb" />
+    <EmbeddedResource Include="Embedded\AnyRadiance2-1.5\README.md" />
+    <EmbeddedResource Include="Embedded\Any_Radiance_3_0\AnyRadiance.dll" />
+    <EmbeddedResource Include="Embedded\Any_Radiance_3_0\AnyRadiance.pdb" />
+    <EmbeddedResource Include="Embedded\Any_Radiance_3_0\ReadMe.md" />
+  </ItemGroup>
+</Project>

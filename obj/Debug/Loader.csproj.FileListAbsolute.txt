@@ -1,0 +1,10 @@
+C:\Program Files (x86)\Steam\steamapps\common\Hollow Knight\hollow_knight_Data\Managed\Mods\AnyRadianceLoader\AnyRadianceLoader.dll
+C:\Program Files (x86)\Steam\steamapps\common\Hollow Knight\hollow_knight_Data\Managed\Mods\AnyRadianceLoader\AnyRadianceLoader.pdb
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Debug\Loader.csproj.AssemblyReference.cache
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Debug\Loader.GeneratedMSBuildEditorConfig.editorconfig
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Debug\Loader.AssemblyInfoInputs.cache
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Debug\Loader.AssemblyInfo.cs
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Debug\Loader.csproj.CoreCompileInputs.cache
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Debug\Loader.csproj.Up2Date
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Debug\AnyRadianceLoader.dll
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Debug\AnyRadianceLoader.pdb

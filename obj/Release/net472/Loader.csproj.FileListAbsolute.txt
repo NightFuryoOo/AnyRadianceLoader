@@ -1,0 +1,10 @@
+C:\Program Files (x86)\Steam\steamapps\common\Hollow Knight\hollow_knight_Data\Managed\Mods\AnyRadianceLoader\net472\AnyRadianceLoader.dll
+C:\Program Files (x86)\Steam\steamapps\common\Hollow Knight\hollow_knight_Data\Managed\Mods\AnyRadianceLoader\net472\AnyRadianceLoader.pdb
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Release\net472\Loader.csproj.AssemblyReference.cache
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Release\net472\Loader.GeneratedMSBuildEditorConfig.editorconfig
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Release\net472\Loader.AssemblyInfoInputs.cache
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Release\net472\Loader.AssemblyInfo.cs
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Release\net472\Loader.csproj.CoreCompileInputs.cache
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Release\net472\Loader.csproj.Up2Date
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Release\net472\AnyRadianceLoader.dll
+D:\NEW WINDOWS\ANY RADIANCE\A\Loader\obj\Release\net472\AnyRadianceLoader.pdb
