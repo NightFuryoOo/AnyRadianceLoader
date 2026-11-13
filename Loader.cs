@@ -1,337 +1,644 @@
 using Modding;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
-using System.Reflection;
-using UnityEngine;
 using System.Linq;
+using System.Reflection;
+using System.Security.Cryptography;
+using UnityEngine;
 
 namespace AnyRadianceLoader
 {
-    internal class LoaderMod : Mod, ILocalSettings<LoaderSettings>, IMenuMod
+    public enum AnyRadianceVersion
     {
-        private const string TargetModsPath = @"C:\Program Files (x86)\Steam\steamapps\common\Hollow Knight\hollow_knight_Data\Managed\Mods";
-        private bool _deployedV1;
-        private bool _deployedV2;
-        private bool _deployedV3;
-        private bool _deployedModCommon;
-        private bool _deploymentOccurred;
+        Off = 0,
+        V1 = 1,
+        V2 = 2,
+        V3 = 3
+    }
 
-        public LoaderMod() : base("Any Radiance Loader") { }
+    public sealed class LoaderGlobalSettings
+    {
+        public AnyRadianceVersion Selected = AnyRadianceVersion.Off;
+        public bool Adopted;
+    }
 
-        public override string GetVersion() => "1.0.0.0";
-
-        public bool ToggleButtonInsideMenu => true;
-
-        public bool Hidden
+    internal sealed class Variant
+    {
+        public Variant(AnyRadianceVersion version, string label, string folder, bool needsModCommon, string? requiredMod, params string[] files)
         {
-            get
-            {
-                var gm = GameManager.instance;
-                return gm != null && gm.gameState != GlobalEnums.GameState.MAIN_MENU;
-            }
+            Version = version;
+            Label = label;
+            Folder = folder;
+            NeedsModCommon = needsModCommon;
+            RequiredMod = requiredMod;
+            Files = files;
         }
 
-        private bool IsInMainMenu()
+        public AnyRadianceVersion Version { get; }
+        public string Label { get; }
+        public string Folder { get; }
+        public bool NeedsModCommon { get; }
+        public string? RequiredMod { get; }
+        public string[] Files { get; }
+
+        public string Resource(string file) => "v" + (int)Version + "/" + file;
+    }
+
+    internal static class Catalog
+    {
+        public const string AssemblyName = "AnyRadiance";
+        public const string ModCommonFolder = "ModCommon";
+        public const string ModCommonFile = "ModCommon_1.5.dll";
+        public const string ModCommonResource = "ModCommon/ModCommon_1.5.dll";
+
+        public static readonly Variant[] Variants =
         {
-            var gm = GameManager.instance;
-            return gm != null && gm.gameState == GlobalEnums.GameState.MAIN_MENU;
-        }
+            new Variant(AnyRadianceVersion.V1, "1.0", "AnyRadianceFixedDDark", true, null, "AnyRadiance.dll"),
+            new Variant(AnyRadianceVersion.V2, "2.0", "AnyRadiance2-1.5", true, null, "AnyRadiance.dll", "AnyRadiance.pdb"),
+            new Variant(AnyRadianceVersion.V3, "3.0", "AnyRadiance 3.0", false, "Vasi", "AnyRadiance.dll", "AnyRadiance.pdb")
+        };
 
-        public static LoaderSettings Settings = new();
+        public static Variant? Find(AnyRadianceVersion version) => Variants.FirstOrDefault(v => v.Version == version);
 
-        public void OnLoadLocal(LoaderSettings s) => Settings = s ?? new LoaderSettings();
-        public LoaderSettings OnSaveLocal() => Settings;
+        public static string Label(AnyRadianceVersion version) => Find(version)?.Label ?? "Off";
 
-        public override void Initialize()
+        public static AnyRadianceVersion? Classify(Assembly assembly)
         {
-            Application.quitting += CleanupBundles;
-            AppDomain.CurrentDomain.ProcessExit += (_, _) => CleanupBundles();
-
-            if (Settings.EnableV1)
-            {
-                TryDeployBundlesV1();
-            }
-
-            if (Settings.EnableV2)
-            {
-                TryDeployBundlesV2();
-            }
-
-            if (Settings.EnableV3)
-            {
-                TryDeployBundlesV3();
-            }
-        }
-
-        public List<IMenuMod.MenuEntry> GetMenuData(IMenuMod.MenuEntry? _)
-        {
-            return new List<IMenuMod.MenuEntry>
-            {
-                new()
-                {
-                    Name = "Use Any Radiance 1.0",
-                    Description = "Copies AnyRadiance 1.0 + ModCommon into Mods and loads it.",
-                    Values = new[] { Language.Language.Get("MOH_ON", "MainMenu"), Language.Language.Get("MOH_OFF", "MainMenu") },
-                    Saver = i =>
-                    {
-                        bool enable = i == 0;
-                        if (enable && _deploymentOccurred) return;
-                        Settings.EnableV1 = enable;
-                        if (enable)
-                        {
-                            TryDeployBundlesV1();
-                        }
-                        else
-                        {
-                            CleanupBundles();
-                        }
-                    },
-                    Loader = () => Settings.EnableV1 ? 0 : 1
-                },
-                new()
-                {
-                    Name = "Use Any Radiance 2.0",
-                    Description = "Copies AnyRadiance 2.0 + ModCommon into Mods and loads it.",
-                    Values = new[] { Language.Language.Get("MOH_ON", "MainMenu"), Language.Language.Get("MOH_OFF", "MainMenu") },
-                    Saver = i =>
-                    {
-                        bool enable = i == 0;
-                        if (enable && _deploymentOccurred) return;
-                        Settings.EnableV2 = enable;
-                        if (enable)
-                        {
-                            TryDeployBundlesV2();
-                        }
-                        else
-                        {
-                            CleanupBundles();
-                        }
-                    },
-                    Loader = () => Settings.EnableV2 ? 0 : 1
-                },
-                new()
-                {
-                    Name = "Use Any Radiance 3.0",
-                    Description = "Copies Any Radiance 3.0 into Mods and loads it.",
-                    Values = new[] { Language.Language.Get("MOH_ON", "MainMenu"), Language.Language.Get("MOH_OFF", "MainMenu") },
-                    Saver = i =>
-                    {
-                        bool enable = i == 0;
-                        if (enable && _deploymentOccurred) return;
-                        Settings.EnableV3 = enable;
-                        if (enable)
-                        {
-                            TryDeployBundlesV3();
-                        }
-                        else
-                        {
-                            CleanupBundles();
-                        }
-                    },
-                    Loader = () => Settings.EnableV3 ? 0 : 1
-                }
-            };
-        }
-
-        private void TryDeployBundlesV1()
-        {
-            if (!IsInMainMenu()) return;
-            if (_deployedV1)
-            {
-                return;
-            }
-
-            DeployVariant("Embedded.AnyRadianceFixedDDark.AnyRadiance.dll", "AnyRadianceFixedDDark", "AnyRadiance.dll", ref _deployedV1, "Any Radiance 1.0");
-        }
-
-        private void TryDeployBundlesV2()
-        {
-            if (!IsInMainMenu()) return;
-            if (_deployedV2)
-            {
-                return;
-            }
-
-            // resource name stored with underscores in assembly: AnyRadiance2_1._5.AnyRadiance.dll
-            DeployVariant("AnyRadianceLoader.Embedded.AnyRadiance2_1._5.AnyRadiance.dll", "AnyRadiance2-1.5", "AnyRadiance.dll", ref _deployedV2, "Any Radiance 2.0");
-        }
-
-        private void TryDeployBundlesV3()
-        {
-            if (!IsInMainMenu()) return;
-            if (_deployedV3)
-            {
-                return;
-            }
-
-            DeployVariant("AnyRadianceLoader.Embedded.Any_Radiance_3_0.AnyRadiance.dll", "AnyRadiance 3.0", "AnyRadiance.dll", ref _deployedV3, "Any Radiance 3.0");
-        }
-
-        private void DeployVariant(string resourcePath, string folderName, string dllName, ref bool deployedFlag, string logName)
-        {
+            string? location = null;
             try
             {
-                // Shared dependency
-                if (!_deployedModCommon)
-                {
-                    ExtractBundle("Embedded.ModCommon.ModCommon_1.5.dll", "ModCommon", "ModCommon_1.5.dll");
-                    _deployedModCommon = true;
-                }
-
-                ExtractBundle(resourcePath, folderName, dllName);
-                deployedFlag = true;
-                _deploymentOccurred = true;
-                TryLoadDeployedMod(folderName, dllName);
-                Log($"{logName} deployed.");
+                location = assembly.Location;
             }
-            catch (Exception e)
+            catch
             {
-                LogError($"Failed to deploy {logName}: {e}");
-            }
-        }
-
-        private void CleanupBundles()
-        {
-            RemoveIfMarked("AnyRadianceFixedDDark");
-            RemoveIfMarked("AnyRadiance2-1.5");
-            RemoveIfMarked("AnyRadiance 3.0");
-            RemoveIfMarked("ModCommon");
-
-            _deployedV1 = false;
-            _deployedV2 = false;
-            _deployedV3 = false;
-            _deployedModCommon = false;
-            Log("Any Radiance mods removed.");
-        }
-
-        private void ExtractBundle(string resourceName, string folderName, string fileName)
-        {
-            Assembly asm = Assembly.GetExecutingAssembly();
-            string Canon(string s) => System.Text.RegularExpressions.Regex.Replace(s, "[^A-Za-z0-9]", "");
-            string targetCanon = Canon(resourceName);
-            string folderCanon = Canon(folderName);
-            string fullResourceName = asm.GetManifestResourceNames()
-                .FirstOrDefault(rn =>
-                {
-                    string rnCanon = Canon(rn);
-                    return rn.EndsWith(resourceName, StringComparison.OrdinalIgnoreCase)
-                        || rnCanon.IndexOf(targetCanon, StringComparison.OrdinalIgnoreCase) >= 0
-                        || (rnCanon.IndexOf(folderCanon, StringComparison.OrdinalIgnoreCase) >= 0 && rn.EndsWith(fileName, StringComparison.OrdinalIgnoreCase));
-                });
-
-            if (fullResourceName == null)
-            {
-                throw new FileNotFoundException($"Embedded resource not found: {resourceName}");
             }
 
-            string targetDir = Path.Combine(TargetModsPath, folderName);
-            Directory.CreateDirectory(targetDir);
-            using Stream stream = asm.GetManifestResourceStream(fullResourceName)
-                ?? throw new FileNotFoundException($"Resource stream not found: {fullResourceName}");
-            string targetFile = Path.Combine(targetDir, fileName);
-            using FileStream fs = new FileStream(targetFile, FileMode.Create, FileAccess.Write);
-            stream.CopyTo(fs);
-            File.WriteAllText(Path.Combine(targetDir, ".loader_marker"), "AnyRadianceLoader");
-
-            // optional extras: copy pdb/readme if present in same folder
-            TryExtractOptional(asm, folderCanon, targetDir, "AnyRadiance.pdb");
-            TryExtractOptional(asm, folderCanon, targetDir, "README.md");
-        }
-
-        private void TryExtractOptional(Assembly asm, string folderCanon, string targetDir, string fileName)
-        {
-            string Canon(string s) => System.Text.RegularExpressions.Regex.Replace(s, "[^A-Za-z0-9]", "");
-            string fileCanon = Canon(fileName);
-            string res = asm.GetManifestResourceNames()
-                .FirstOrDefault(rn =>
-                {
-                    string rnCanon = Canon(rn);
-                    return rnCanon.IndexOf(folderCanon, StringComparison.OrdinalIgnoreCase) >= 0
-                           && rnCanon.EndsWith(fileCanon, StringComparison.OrdinalIgnoreCase);
-                });
-
-            if (res == null) return;
-
-            using Stream stream = asm.GetManifestResourceStream(res);
-            if (stream == null) return;
-
-            string targetFile = Path.Combine(targetDir, fileName);
-            using FileStream fs = new FileStream(targetFile, FileMode.Create, FileAccess.Write);
-            stream.CopyTo(fs);
-        }
-
-        private void RemoveIfMarked(string folderName)
-        {
-            string target = Path.Combine(TargetModsPath, folderName);
-            string marker = Path.Combine(target, ".loader_marker");
-            try
+            if (!string.IsNullOrEmpty(location) && File.Exists(location))
             {
-                if (Directory.Exists(target) && File.Exists(marker))
+                string hash = HashFile(location!);
+                foreach (Variant variant in Variants)
                 {
-                    Directory.Delete(target, true);
+                    if (hash == HashResource(variant.Resource(variant.Files[0])))
+                    {
+                        return variant.Version;
+                    }
                 }
             }
-            catch (Exception e)
-            {
-                LogError($"Failed to clean {target}: {e}");
-            }
+
+            return ClassifyByTypes(assembly);
         }
 
-        private void TryLoadDeployedMod(string folder, string dllName)
+        public static AnyRadianceVersion? ClassifyByTypes(Assembly assembly)
         {
-            // Load ModCommon first if present
-            string modCommonPath = Path.Combine(TargetModsPath, "ModCommon", "ModCommon_1.5.dll");
-            if (File.Exists(modCommonPath))
+            if (assembly.GetType("AnyRadiance.Radiance.Radiance", false) != null)
             {
-                try { Assembly.LoadFrom(modCommonPath); }
-                catch (Exception e) { LogError($"Failed to load ModCommon: {e}"); }
+                return AnyRadianceVersion.V3;
             }
 
-            string anyRadPath = Path.Combine(TargetModsPath, folder, dllName);
-            if (!File.Exists(anyRadPath))
+            if (assembly.GetType("Abs", false) != null)
             {
-                LogError($"AnyRadiance.dll not found at {anyRadPath}");
-                return;
+                return AnyRadianceVersion.V1;
             }
 
-            try
+            if (assembly.GetType("Radiance", false) != null)
             {
-                Assembly asm = Assembly.LoadFrom(anyRadPath);
-                Type modType = asm.GetTypes().FirstOrDefault(t => typeof(Mod).IsAssignableFrom(t) && !t.IsAbstract);
-                if (modType == null)
+                return AnyRadianceVersion.V2;
+            }
+
+            return null;
+        }
+
+        private static readonly Dictionary<string, string> ResourceHashes = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        private static string HashResource(string resource)
+        {
+            if (ResourceHashes.TryGetValue(resource, out string? known))
+            {
+                return known;
+            }
+
+            using Stream? stream = typeof(Catalog).Assembly.GetManifestResourceStream(resource);
+            using SHA256 sha = SHA256.Create();
+            string hash = stream == null ? string.Empty : BitConverter.ToString(sha.ComputeHash(stream));
+            ResourceHashes[resource] = hash;
+            return hash;
+        }
+
+        private static string HashFile(string path)
+        {
+            using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using SHA256 sha = SHA256.Create();
+            return BitConverter.ToString(sha.ComputeHash(stream));
+        }
+    }
+
+    internal sealed class Switcher
+    {
+        public const string Marker = ".anyradianceloader";
+        public const string LegacyMarker = ".loader_marker";
+        public const string RemoveRequest = ".anyradianceloader-remove";
+        private const string RemovedSuffix = ".removed";
+
+        private readonly string modsDir;
+        private readonly Func<string, Stream?> openResource;
+        private readonly Action<string> log;
+
+        public Switcher(string modsDir, Func<string, Stream?> openResource, Action<string> log)
+        {
+            this.modsDir = modsDir;
+            this.openResource = openResource;
+            this.log = log;
+        }
+
+        public List<string> Warnings { get; } = new List<string>();
+
+        public List<string> PendingRemovals { get; } = new List<string>();
+
+        public static bool IsOwned(string dir) =>
+            File.Exists(Path.Combine(dir, Marker)) || File.Exists(Path.Combine(dir, LegacyMarker));
+
+        public static string RemovalArguments(string dir)
+        {
+            string folder = Quote(dir);
+            string request = Quote(Path.Combine(dir, RemoveRequest));
+            string script = $"while (Test-Path -LiteralPath {request}) {{ Get-ChildItem -LiteralPath {folder} -Filter *.dll | Remove-Item -Force -ErrorAction SilentlyContinue; if (-not (Get-ChildItem -LiteralPath {folder} -Filter *.dll)) {{ Remove-Item -LiteralPath {folder} -Recurse -Force -ErrorAction SilentlyContinue; break }}; Start-Sleep -Seconds 3 }}";
+            return $"-NoProfile -NonInteractive -WindowStyle Hidden -Command \"{script}\"";
+        }
+
+        private static string Quote(string path) => "'" + path.Replace("'", "''") + "'";
+
+        public void Apply(AnyRadianceVersion selected)
+        {
+            Warnings.Clear();
+            PendingRemovals.Clear();
+            Variant? chosen = Catalog.Find(selected);
+
+            foreach (Variant variant in Catalog.Variants)
+            {
+                string dir = Path.Combine(modsDir, variant.Folder);
+                if (variant.Version == selected)
                 {
-                    LogError("Mod type not found in AnyRadiance.dll");
-                    return;
+                    Install(variant, dir);
                 }
-
-                var modInstance = (Mod)Activator.CreateInstance(modType);
-
-                // Try to find Initialize(Dictionary<string, Dictionary<string, GameObject>>)
-                var initWithDict = modType.GetMethod("Initialize", new Type[] { typeof(Dictionary<string, Dictionary<string, GameObject>>) });
-                if (initWithDict != null)
+                else if (Directory.Exists(dir) && !IsOwned(dir) && HasContent(dir))
                 {
-                    initWithDict.Invoke(modInstance, new object[] { new Dictionary<string, Dictionary<string, GameObject>>() });
+                    Warnings.Add($"{variant.Folder} was not installed by the loader, so it stays and loads together with the chosen version. Remove that folder by hand.");
                 }
                 else
                 {
-                    modInstance.Initialize();
+                    Remove(dir);
+                }
+            }
+
+            if (chosen == null)
+            {
+                return;
+            }
+
+            if (chosen.NeedsModCommon)
+            {
+                InstallModCommon();
+            }
+
+            if (chosen.RequiredMod != null && !Directory.Exists(Path.Combine(modsDir, chosen.RequiredMod)))
+            {
+                Warnings.Add($"AnyRadiance {chosen.Label} needs the {chosen.RequiredMod} mod. Install it with Lumafly.");
+            }
+        }
+
+        private void Install(Variant variant, string dir)
+        {
+            if (Directory.Exists(dir) && !IsOwned(dir) && HasContent(dir))
+            {
+                string dll = Path.Combine(dir, variant.Files[0]);
+                if (File.Exists(dll) && SameAsResource(dll, variant.Resource(variant.Files[0])))
+                {
+                    log($"AnyRadiance {variant.Label} is already in {variant.Folder} (installed by hand), the loader leaves it as it is.");
+                    return;
                 }
 
-                Log($"{folder} initialized via loader.");
+                Warnings.Add($"{variant.Folder} holds files that the loader did not install. Remove that folder to let the loader install AnyRadiance {variant.Label}.");
+                return;
             }
-            catch (Exception e)
+
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, Marker), "AnyRadianceLoader");
+            DeleteQuietly(Path.Combine(dir, RemoveRequest));
+            foreach (string removed in Directory.GetFiles(dir, "*" + RemovedSuffix))
             {
-                LogError($"Failed to initialize AnyRadiance: {e}");
+                DeleteQuietly(removed);
+            }
+
+            foreach (string file in variant.Files)
+            {
+                WriteFile(Path.Combine(dir, file), variant.Resource(file));
+            }
+
+            log($"AnyRadiance {variant.Label} is in place in {variant.Folder}.");
+        }
+
+        private void InstallModCommon()
+        {
+            string dir = Path.Combine(modsDir, Catalog.ModCommonFolder);
+            string target = Path.Combine(dir, Catalog.ModCommonFile);
+            if (Directory.Exists(dir) && !IsOwned(dir) && HasContent(dir))
+            {
+                if (!Directory.GetFiles(dir, "*.dll").Any())
+                {
+                    Warnings.Add($"{Catalog.ModCommonFolder} has no dll in it. Reinstall ModCommon with Lumafly.");
+                }
+
+                return;
+            }
+
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, Marker), "AnyRadianceLoader");
+            WriteFile(target, Catalog.ModCommonResource);
+        }
+
+        private void Remove(string dir)
+        {
+            if (!Directory.Exists(dir) || !IsOwned(dir))
+            {
+                return;
+            }
+
+            string name = Path.GetFileName(dir);
+            bool blocked = false;
+            foreach (string path in Directory.GetFiles(dir))
+            {
+                if (IsControlFile(path) || TryDelete(path))
+                {
+                    continue;
+                }
+
+                if (!path.EndsWith(RemovedSuffix, StringComparison.OrdinalIgnoreCase)
+                    && path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                    && TryMove(path, path + RemovedSuffix))
+                {
+                    continue;
+                }
+
+                if (path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                {
+                    blocked = true;
+                }
+            }
+
+            bool leftovers = Directory.GetFileSystemEntries(dir).Any(entry => !IsControlFile(entry));
+            if (!leftovers)
+            {
+                try
+                {
+                    Directory.Delete(dir, true);
+                    log($"Removed {name}.");
+                    return;
+                }
+                catch (Exception e)
+                {
+                    log($"Could not remove the empty folder {name}: {e.Message}");
+                    return;
+                }
+            }
+
+            File.WriteAllText(Path.Combine(dir, RemoveRequest), "AnyRadianceLoader");
+            if (blocked)
+            {
+                PendingRemovals.Add(dir);
+                log($"{name} is in use by the game and will be removed after the game closes.");
+            }
+            else
+            {
+                log($"{name} is switched off; its leftover files are removed at the next start.");
+            }
+        }
+
+        private void WriteFile(string target, string resource)
+        {
+            byte[]? data = ReadResource(resource);
+            if (data == null)
+            {
+                Warnings.Add($"The loader is missing its copy of {resource}.");
+                return;
+            }
+
+            if (File.Exists(target) && Hash(File.ReadAllBytes(target)) == Hash(data))
+            {
+                return;
+            }
+
+            string temp = target + ".new";
+            File.WriteAllBytes(temp, data);
+            if (File.Exists(target) && !TryDelete(target) && !TryMove(target, target + RemovedSuffix))
+            {
+                DeleteQuietly(temp);
+                Warnings.Add($"{target} is in use by the game. Restart the game and choose the version again.");
+                return;
+            }
+
+            File.Move(temp, target);
+        }
+
+        private bool SameAsResource(string path, string resource)
+        {
+            byte[]? data = ReadResource(resource);
+            return data != null && Hash(File.ReadAllBytes(path)) == Hash(data);
+        }
+
+        private byte[]? ReadResource(string resource)
+        {
+            using Stream? stream = openResource(resource);
+            if (stream == null)
+            {
+                return null;
+            }
+
+            using MemoryStream copy = new MemoryStream();
+            stream.CopyTo(copy);
+            return copy.ToArray();
+        }
+
+        private static string Hash(byte[] data)
+        {
+            using SHA256 sha = SHA256.Create();
+            return BitConverter.ToString(sha.ComputeHash(data));
+        }
+
+        private static bool HasContent(string dir) =>
+            Directory.GetFileSystemEntries(dir).Any(entry => !IsControlFile(entry));
+
+        private static bool IsControlFile(string path)
+        {
+            string name = Path.GetFileName(path);
+            return name == Marker || name == LegacyMarker || name == RemoveRequest;
+        }
+
+        private static bool TryDelete(string path)
+        {
+            try
+            {
+                File.Delete(path);
+                return !File.Exists(path);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryMove(string from, string to)
+        {
+            try
+            {
+                if (File.Exists(to))
+                {
+                    File.Delete(to);
+                }
+
+                File.Move(from, to);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void DeleteQuietly(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch
+            {
             }
         }
     }
 
-    [Serializable]
-    internal class LoaderSettings
+    internal sealed class LoaderMod : Mod, IGlobalSettings<LoaderGlobalSettings>, IMenuMod
     {
-        public bool EnableV1 = false;
-        public bool EnableV2 = false;
-        public bool EnableV3 = false;
+        private static readonly string[] SelectorValues = { "Off", "1.0", "2.0", "3.0" };
+
+        private readonly HashSet<string> scheduledRemovals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private LoaderGlobalSettings settings = new LoaderGlobalSettings();
+        private Switcher? switcher;
+        private string loadedNow = "Off";
+        private string status = string.Empty;
+
+        public LoaderMod() : base("Any Radiance Loader")
+        {
+        }
+
+        public bool ToggleButtonInsideMenu => false;
+
+        public override string GetVersion() => typeof(LoaderMod).Assembly.GetName().Version.ToString();
+
+        public void OnLoadGlobal(LoaderGlobalSettings loaded) => settings = loaded ?? new LoaderGlobalSettings();
+
+        public LoaderGlobalSettings OnSaveGlobal() => settings;
+
+        public override void Initialize()
+        {
+            List<(AnyRadianceVersion? Version, string Folder)> loaded = FindLoadedAnyRadiance();
+            loadedNow = Describe(loaded);
+            if (loaded.Count > 1)
+            {
+                LogWarn($"Several AnyRadiance versions are loaded at once: {loadedNow}.");
+            }
+
+            if (!settings.Adopted)
+            {
+                settings.Adopted = true;
+                if (loaded.Count == 1 && loaded[0].Version is AnyRadianceVersion current)
+                {
+                    settings.Selected = current;
+                }
+            }
+
+            string? modsDir = FindModsDirectory();
+            if (modsDir == null)
+            {
+                LogError("Could not find the Mods folder.");
+                return;
+            }
+
+            switcher = new Switcher(modsDir, name => typeof(LoaderMod).Assembly.GetManifestResourceStream(name), Log);
+            Apply();
+            Log($"Loaded now: {loadedNow}. Selected: {Catalog.Label(settings.Selected)}.");
+        }
+
+        public List<IMenuMod.MenuEntry> GetMenuData(IMenuMod.MenuEntry? toggleButtonEntry)
+        {
+            return new List<IMenuMod.MenuEntry>
+            {
+                new IMenuMod.MenuEntry
+                {
+                    Name = "AnyRadiance version",
+                    Description = "Takes effect after you restart the game.",
+                    Values = SelectorValues,
+                    Saver = index => Select((AnyRadianceVersion)index),
+                    Loader = () => (int)settings.Selected
+                },
+                new IMenuMod.MenuEntry
+                {
+                    Name = "Loaded now",
+                    Description = status.Length > 0 ? status : "The AnyRadiance version the game loaded at startup.",
+                    Values = new[] { loadedNow },
+                    Saver = _ => { },
+                    Loader = () => 0
+                }
+            };
+        }
+
+        private void Select(AnyRadianceVersion version)
+        {
+            if (version == settings.Selected)
+            {
+                return;
+            }
+
+            settings.Selected = version;
+            Apply();
+            SaveGlobalSettings();
+            Log($"Selected AnyRadiance {Catalog.Label(version)}. Restart the game to load it.");
+        }
+
+        private void Apply()
+        {
+            if (switcher == null)
+            {
+                return;
+            }
+
+            try
+            {
+                switcher.Apply(settings.Selected);
+            }
+            catch (Exception e)
+            {
+                LogError($"Switching AnyRadiance failed: {e}");
+                return;
+            }
+
+            foreach (string warning in switcher.Warnings)
+            {
+                LogWarn(warning);
+            }
+
+            scheduledRemovals.IntersectWith(switcher.PendingRemovals);
+            foreach (string dir in switcher.PendingRemovals)
+            {
+                ScheduleRemoval(dir);
+            }
+
+            status = string.Join(" ", switcher.Warnings.ToArray());
+        }
+
+        private void ScheduleRemoval(string dir)
+        {
+            if (Application.platform != RuntimePlatform.WindowsPlayer || !scheduledRemovals.Add(dir))
+            {
+                return;
+            }
+
+            try
+            {
+                ProcessStartInfo start = new ProcessStartInfo("powershell.exe", Switcher.RemovalArguments(dir))
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                Process.Start(start)?.Dispose();
+                Log($"{Path.GetFileName(dir)} will be removed after the game closes.");
+            }
+            catch (Exception e)
+            {
+                LogWarn($"Could not schedule the removal of {dir}: {e.Message}. Delete that folder by hand after closing the game.");
+            }
+        }
+
+        private static List<(AnyRadianceVersion? Version, string Folder)> FindLoadedAnyRadiance()
+        {
+            List<(AnyRadianceVersion? Version, string Folder)> result = new List<(AnyRadianceVersion? Version, string Folder)>();
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                string? name;
+                try
+                {
+                    name = assembly.GetName().Name;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (name != Catalog.AssemblyName)
+                {
+                    continue;
+                }
+
+                string folder = "?";
+                try
+                {
+                    folder = Path.GetFileName(Path.GetDirectoryName(assembly.Location)) ?? "?";
+                }
+                catch
+                {
+                }
+
+                AnyRadianceVersion? version = null;
+                try
+                {
+                    version = Catalog.Classify(assembly);
+                }
+                catch
+                {
+                }
+
+                result.Add((version, folder));
+            }
+
+            return result;
+        }
+
+        private static string Describe(List<(AnyRadianceVersion? Version, string Folder)> loaded)
+        {
+            if (loaded.Count == 0)
+            {
+                return "Off";
+            }
+
+            string text = string.Join(" + ", loaded.Select(item => item.Version is AnyRadianceVersion version ? Catalog.Label(version) : "unknown (" + item.Folder + ")").ToArray());
+            return loaded.Count > 1 ? text + " (conflict)" : text;
+        }
+
+        private static string? FindModsDirectory()
+        {
+            try
+            {
+                string? dir = Path.GetDirectoryName(typeof(LoaderMod).Assembly.Location);
+                for (int depth = 0; dir != null && depth < 3; depth++)
+                {
+                    if (string.Equals(Path.GetFileName(dir), "Mods", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return dir;
+                    }
+
+                    dir = Path.GetDirectoryName(dir);
+                }
+            }
+            catch
+            {
+            }
+
+            string fallback = Path.Combine(Path.Combine(Application.dataPath, "Managed"), "Mods");
+            return Directory.Exists(fallback) ? fallback : null;
+        }
     }
 }
